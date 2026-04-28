@@ -217,10 +217,6 @@ claw delete <alias> [OPTIONS]
 ```
 claw-memory-engine/
 ├── README.md                 # 本文件
-├── docs/
-│   ├── PROJECT_PLAN.md       # 项目规划文档
-│   ├── TECHNICAL_DOC.md      # 技术文档
-│   └── USER_GUIDE.md         # 用户指南
 ├── src/
 │   ├── __init__.py
 │   ├── cli/
@@ -246,60 +242,6 @@ claw-memory-engine/
 │   └── integration/
 ├── requirements.txt
 └── pyproject.toml
-```
-
----
-
-## 开发计划
-
-### Phase 1: Day 1-3 (基础搭建) ✅
-
-- [x] 项目脚手架
-- [x] SQLite 存储层
-- [x] CLI 基础命令
-
-### Phase 2: Day 4-6 (核心引擎)
-
-- [ ] ChromaDB 集成
-- [ ] 语义搜索
-- [ ] 项目上下文感知
-
-### Phase 3: Day 7-9 (集成优化)
-
-- [ ] Shell 补全集成
-- [ ] 遗忘引擎
-- [ ] 白皮书初稿
-
-### Phase 4: Day 10-12 (评测专项)
-
-- [ ] 抗干扰测试
-- [ ] 矛盾更新测试
-- [ ] 效能指标统计
-
-### Phase 5: Day 13-14 (交付冲刺)
-
-- [ ] Demo 录屏
-- [ ] 文档完善
-- [ ] 最终提交
-
----
-
-## 评测指标
-
-### 抗干扰测试
-
-在注入 100 条无关命令后，关键记忆的召回率 > 85%
-
-### 矛盾更新测试
-
-先后输入冲突指令，系统正确覆盖旧记忆
-
-### 效能指标
-
-```
-使用前：50 个字符
-使用后：10 个字符
-提效：80%
 ```
 
 ---
