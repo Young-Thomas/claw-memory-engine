@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claw-memory-engine"
+version = "0.1.0"
+description = "CLI 智能记忆助手 - 基于语义理解的工作流记忆系统"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Claw Memory Team", email = "team@claw-memory.dev"}
+]
+keywords = ["cli", "memory", "productivity", "rag", "semantic-search"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.7.0",
+    "chromadb>=0.4.22",
+    "sentence-transformers>=2.2.2",
+    "pydantic>=2.5.0",
+    "sqlite-utils>=3.36",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.12.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+claw = "src.cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/claw-memory-engine"
+Documentation = "https://github.com/claw-memory-engine/docs"
+Repository = "https://github.com/claw-memory-engine/claw-memory-engine"
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+include = '\.pyi?$'
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "-v --cov=src --cov-report=term-missing"
