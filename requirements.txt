@@ -14,6 +14,12 @@ pydantic>=2.5.0
 # Database
 sqlite-utils>=3.36
 
+# HTTP Client (for Feishu integration)
+requests>=2.31.0
+
+# Scheduler (for forgetting curve)
+APScheduler>=3.10.0
+
 # Testing
 pytest>=7.4.0
 pytest-cov>=4.1.0

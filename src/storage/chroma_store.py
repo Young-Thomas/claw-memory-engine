@@ -4,19 +4,44 @@ ChromaDB 向量存储层
 负责记忆命令的向量化存储与语义检索
 """
 
-import os
+import sys
+try:
+    import pysqlite3
+    sys.modules['sqlite3'] = pysqlite3
+except ImportError:
+    pass
+
 import hashlib
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+from functools import lru_cache
 
 import chromadb
 from chromadb.config import Settings
 
 from src.core.models import Memory
+from src.config.config_manager import get_chroma_path
+from src.logger.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class ChromaStore:
     """ChromaDB 向量存储管理器"""
+
+    _instances: Dict[str, 'ChromaStore'] = {}
+
+    def __new__(cls, persist_dir: Optional[str] = None):
+        """单例模式"""
+        if persist_dir is None:
+            persist_dir = str(get_chroma_path())
+
+        if persist_dir not in cls._instances:
+            instance = super().__new__(cls)
+            instance._initialized = False
+            cls._instances[persist_dir] = instance
+        return cls._instances[persist_dir]
 
     def __init__(self, persist_dir: Optional[str] = None):
         """
@@ -25,11 +50,13 @@ class ChromaStore:
         Args:
             persist_dir: 持久化目录，默认为 ~/.claw/chroma_db
         """
+        if self._initialized:
+            return
+
         if persist_dir is None:
-            home = Path.home()
-            claw_dir = home / ".claw"
-            claw_dir.mkdir(exist_ok=True)
-            persist_dir = claw_dir / "chroma_db"
+            persist_dir = str(get_chroma_path())
+
+        self.persist_dir = persist_dir
 
         # 创建持久化目录
         persist_path = Path(persist_dir)
@@ -52,6 +79,9 @@ class ChromaStore:
                 "dimension": 384  # all-MiniLM-L6-v2 的输出维度
             }
         )
+
+        logger.info(f"ChromaStore initialized: {persist_dir}")
+        self._initialized = True
 
     def add_memory(self, memory: Memory, embedding: Optional[List[float]] = None) -> None:
         """

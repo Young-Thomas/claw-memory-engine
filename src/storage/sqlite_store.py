@@ -9,12 +9,32 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+from functools import lru_cache
 
 from src.core.models import Memory, Project, UsageLog
+from src.config.config_manager import get_db_path
+from src.logger.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class SQLiteStore:
     """SQLite 存储管理器"""
+
+    _instances: Dict[str, 'SQLiteStore'] = {}
+    _connection_cache: Dict[str, sqlite3.Connection] = {}
+
+    def __new__(cls, db_path: Optional[str] = None):
+        """单例模式，共享实例"""
+        if db_path is None:
+            db_path = str(get_db_path())
+
+        if db_path not in cls._instances:
+            instance = super().__new__(cls)
+            instance._initialized = False
+            cls._instances[db_path] = instance
+        return cls._instances[db_path]
 
     def __init__(self, db_path: Optional[str] = None):
         """
@@ -23,19 +43,26 @@ class SQLiteStore:
         Args:
             db_path: 数据库路径，默认为 ~/.claw/claw.db
         """
-        if db_path is None:
-            home = Path.home()
-            claw_dir = home / ".claw"
-            claw_dir.mkdir(exist_ok=True)
-            db_path = claw_dir / "claw.db"
+        if self._initialized:
+            return
 
-        self.db_path = str(db_path)
+        if db_path is None:
+            db_path = str(get_db_path())
+
+        self.db_path = db_path
         self._init_tables()
+        logger.info(f"SQLiteStore initialized: {db_path}")
+        self._initialized = True
 
     def _get_connection(self) -> sqlite3.Connection:
-        """获取数据库连接"""
+        """获取数据库连接（带缓存）"""
+        if self.db_path in self._connection_cache:
+            return self._connection_cache[self.db_path]
+
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        self._connection_cache[self.db_path] = conn
+        logger.debug(f"New SQLite connection: {self.db_path}")
         return conn
 
     def _init_tables(self):
