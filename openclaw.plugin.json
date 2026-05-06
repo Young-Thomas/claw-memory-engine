@@ -1,0 +1,65 @@
+{
+  "id": "claw-memory-engine",
+  "name": "Claw Memory Engine",
+  "version": "0.1.0",
+  "kind": "memory",
+  "description": "企业级 CLI 智能记忆引擎 - 基于语义理解的工作流记忆系统，支持 Ebbinghaus 遗忘曲线、项目上下文感知和飞书集成",
+  "skillsDir": "openclaw-skills",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "dataDir": {
+        "type": "string",
+        "description": "数据存储目录路径",
+        "default": "~/.claw"
+      },
+      "embeddingModel": {
+        "type": "string",
+        "description": "嵌入模型名称",
+        "default": "all-MiniLM-L6-v2"
+      },
+      "forgettingEnabled": {
+        "type": "boolean",
+        "description": "是否启用遗忘曲线",
+        "default": true
+      },
+      "feishuAppId": {
+        "type": "string",
+        "description": "飞书应用 App ID"
+      },
+      "feishuAppSecret": {
+        "type": "string",
+        "description": "飞书应用 App Secret"
+      },
+      "feishuChatId": {
+        "type": "string",
+        "description": "飞书群聊 ID（用于推送通知）"
+      },
+      "schedulerEnabled": {
+        "type": "boolean",
+        "description": "是否启用遗忘调度器",
+        "default": true
+      },
+      "schedulerCheckHour": {
+        "type": "integer",
+        "description": "每日检查时间（小时，0-23）",
+        "default": 9
+      }
+    }
+  },
+  "uiHints": {
+    "feishuAppId": {
+      "label": "飞书 App ID",
+      "sensitive": false
+    },
+    "feishuAppSecret": {
+      "label": "飞书 App Secret",
+      "sensitive": true
+    },
+    "feishuChatId": {
+      "label": "飞书群聊 ID",
+      "sensitive": false
+    }
+  }
+}

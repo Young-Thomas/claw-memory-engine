@@ -5,7 +5,14 @@ Claw Memory Engine - CLI 主入口
 """
 
 import sys
+import os
+from pathlib import Path
 from typing import Optional, List
+
+if sys.platform == "win32":
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 import typer
 from rich.console import Console
@@ -14,14 +21,19 @@ from rich.table import Table
 from rich.theme import Theme
 
 from src.core.models import Memory
+from src.core.implicit_memory import ImplicitMemoryEngine
+from src.core.decision_engine import DecisionEngine
+from src.core.team_memory import TeamMemoryEngine
 from src.storage.sqlite_store import SQLiteStore
 from src.storage.chroma_store import ChromaStore
 from src.retrieval.engine import RetrievalEngine, ContextManager
 from src.retrieval.embeddings import encode_text
 from src.cli.completion import install_completion, generate_bash_completion, generate_zsh_completion, get_complete_aliases
+from src.cli.shell_completion import get_matching_memories, install_shell_completion
 from src.config.config_manager import get_config_manager, Config
 from src.integrations.feishu import FeishuClient, get_feishu_client
 from src.integrations.scheduler import get_forgetting_scheduler, start_scheduler, stop_scheduler
+from src.integrations.openclaw import get_openclaw_bridge
 
 # 自定义主题
 custom_theme = Theme({
@@ -708,6 +720,503 @@ def scheduler_check_cmd(
 # ==================== 导入 time 模块 ====================
 
 import time
+
+
+# ==================== 团队共享记忆命令 ====================
+
+@app.command("team-inject")
+def team_inject_cmd(
+    content: str = typer.Argument(..., help="记忆内容"),
+    alias: Optional[str] = typer.Option(None, "--alias", "-a", help="别名"),
+    scope: str = typer.Option("team:default", "--scope", "-s", help="作用域 (personal / team:{id} / project:{path})"),
+    description: Optional[str] = typer.Option(None, "--desc", "-d", help="描述"),
+    tags: Optional[str] = typer.Option(None, "--tags", "-t", help="标签（逗号分隔）"),
+    chat_id: Optional[str] = typer.Option(None, "--chat-id", help="飞书群聊ID"),
+    injected_by: Optional[str] = typer.Option(None, "--by", help="注入者"),
+):
+    """
+    注入团队共享记忆
+
+    示例:
+
+        claw team-inject "API密钥已更新为xxx" --scope team:backend
+
+        claw team-inject "部署流程变更" --alias deploy-process --desc "新流程" --chat-id oc_xxx
+
+        claw team-inject "客户偏好A方案" --scope project:/my-project --by "张三"
+    """
+    engine = TeamMemoryEngine()
+    tag_list = tags.split(",") if tags else None
+
+    result = engine.inject(
+        content=content,
+        alias=alias,
+        scope=scope,
+        description=description,
+        tags=tag_list,
+        chat_id=chat_id,
+        injected_by=injected_by,
+    )
+
+    action_text = "更新" if result["action"] == "updated" else "创建"
+    console.print(
+        Panel(
+            f"[success]团队记忆已{action_text}[/]\n\n"
+            f"  别名: {result['alias']}\n\n"
+            f"  作用域: {result['scope']}\n\n"
+            f"  版本: v{result['version']}\n\n"
+            f"  注入者: {result.get('injected_by', 'N/A')}",
+            title="📢 团队共享记忆",
+            border_style="green"
+        )
+    )
+
+
+@app.command("team-list")
+def team_list_cmd(
+    scope: str = typer.Option("team:default", "--scope", "-s", help="作用域"),
+    limit: int = typer.Option(20, "--limit", "-l", help="最大数量"),
+):
+    """
+    列出团队/项目作用域的记忆
+
+    示例:
+
+        claw team-list --scope team:backend
+
+        claw team-list --scope project:/my-project
+    """
+    engine = TeamMemoryEngine()
+    result = engine.list_team_memories(scope, limit)
+
+    if result["count"] == 0:
+        console.print(f"[info]作用域 {scope} 暂无记忆[/]")
+        return
+
+    table = Table(
+        title=f"📢 团队记忆 (作用域: {scope})",
+        show_header=True,
+        header_style="bold magenta",
+    )
+    table.add_column("别名", style="cyan")
+    table.add_column("内容", style="green")
+    table.add_column("标签", style="yellow")
+    table.add_column("版本", style="blue")
+    table.add_column("频率", style="magenta")
+
+    for m in result["memories"]:
+        table.add_row(
+            m["alias"],
+            m["content"][:40],
+            ",".join(m["tags"][:3]),
+            f"v{m['version']}",
+            str(m["frequency"]),
+        )
+
+    console.print(table)
+
+
+@app.command("team-forgetting")
+def team_forgetting_cmd(
+    scope: str = typer.Option("team:default", "--scope", "-s", help="作用域"),
+    chat_id: Optional[str] = typer.Option(None, "--chat-id", help="飞书群聊ID"),
+):
+    """
+    检查团队记忆的遗忘状态
+
+    示例:
+
+        claw team-forgetting --scope team:backend
+
+        claw team-forgetting --scope team:backend --chat-id oc_xxx
+    """
+    engine = TeamMemoryEngine()
+    result = engine.check_team_forgetting(scope, chat_id)
+
+    console.print(
+        Panel(
+            f"作用域: {result['scope']}\n\n"
+            f"🔴 即将过期: {result['expiring_soon']} 条\n\n"
+            f"🟡 需要复习: {result['review_needed']} 条",
+            title="⚠️ 团队记忆遗忘状态",
+            border_style="yellow"
+        )
+    )
+
+    if result["expiring_details"]:
+        console.print("\n[error]即将过期:[/]")
+        for item in result["expiring_details"]:
+            console.print(f"  • {item['alias']}: {item['content'][:40]} (保留率: {item['retention']:.0%})")
+
+    if result["review_details"]:
+        console.print("\n[warning]需要复习:[/]")
+        for item in result["review_details"]:
+            console.print(f"  • {item['alias']}: {item['content'][:40]} (保留率: {item['retention']:.0%})")
+
+
+# ==================== 决策提取命令 ====================
+
+@app.command("extract-decision")
+def extract_decision_cmd(
+    text: str = typer.Argument(..., help="要提取决策的文本"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="关联项目"),
+    source: Optional[str] = typer.Option(None, "--source", "-s", help="来源（如飞书群聊ID）"),
+    chat_id: Optional[str] = typer.Option(None, "--chat-id", help="飞书群聊ID（用于推送通知）"),
+):
+    """
+    从文本中提取结构化决策记忆
+
+    支持提取：决策内容、理由、结论、反对意见
+
+    示例:
+
+        claw extract-decision "我们决定采用方案B，因为性能更好"
+
+        claw extract-decision "确认截止日期是5号" --project /my-project
+
+        claw extract-decision "决定用React，不过有人反对觉得Vue更好" --chat-id oc_xxx
+    """
+    engine = DecisionEngine()
+    result = engine.extract_and_store(
+        text=text,
+        project=project,
+        source=source,
+        chat_id=chat_id,
+    )
+
+    if result["decisions_found"] == 0:
+        console.print("[info]未检测到决策内容[/]")
+        return
+
+    console.print(
+        Panel(
+            f"[success]提取到 {result['decisions_found']} 条决策，已存储 {result['stored']} 条[/]",
+            title="📋 决策提取",
+            border_style="green"
+        )
+    )
+
+    for detail in result.get("details", []):
+        lines = [f"  决策: {detail['content']}"]
+        if detail.get("reason"):
+            lines.append(f"  理由: {detail['reason']}")
+        if detail.get("conclusion"):
+            lines.append(f"  结论: {detail['conclusion']}")
+        if detail.get("opposition"):
+            lines.append(f"  反对: {detail['opposition']}")
+        console.print("\n".join(lines))
+
+
+@app.command("find-decision")
+def find_decision_cmd(
+    query: str = typer.Argument(..., help="搜索查询"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="关联项目"),
+    limit: int = typer.Option(5, "--limit", "-l", help="最大结果数"),
+):
+    """
+    查找与查询相关的历史决策
+
+    示例:
+
+        claw find-decision "技术选型"
+
+        claw find-decision "截止日期" --project /my-project
+    """
+    engine = DecisionEngine()
+    results = engine.find_related_decisions(query, project, limit)
+
+    if not results:
+        console.print("[info]未找到相关决策[/]")
+        return
+
+    table = Table(
+        title="📋 相关决策",
+        show_header=True,
+        header_style="bold magenta",
+    )
+    table.add_column("决策内容", style="cyan")
+    table.add_column("描述", style="green")
+    table.add_column("匹配度", style="yellow")
+    table.add_column("匹配类型", style="blue")
+
+    for r in results:
+        table.add_row(
+            r["content"][:50],
+            (r["description"] or "")[:50],
+            f"{r['score']:.2f}",
+            r["match_type"],
+        )
+
+    console.print(table)
+
+
+# ==================== 隐式记忆命令 ====================
+
+@app.command("scan-history")
+def scan_history_cmd(
+    min_freq: int = typer.Option(
+        3, "--min-freq", "-m", help="最小频率阈值"
+    ),
+    max_memories: int = typer.Option(
+        50, "--max", help="最大记忆数量"
+    ),
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="关联项目"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="仅预览，不实际写入"
+    ),
+):
+    """
+    扫描 Shell 命令历史，自动提取高频命令作为隐式记忆
+
+    支持 Bash (.bash_history)、Zsh (.zsh_history)、PowerShell (PSReadLine)
+
+    示例:
+
+        claw scan-history
+
+        claw scan-history --min-freq 5 --max 30
+
+        claw scan-history --dry-run
+    """
+    engine = ImplicitMemoryEngine()
+
+    if dry_run:
+        stats = engine.get_history_stats()
+        console.print(
+            Panel(
+                f"[info]历史文件：[/]\n"
+                + "\n".join(f"  • {f}" for f in stats["history_files"])
+                + f"\n\n[info]总命令数：[/]{stats['total_commands']}\n\n"
+                f"[info]高频命令数：[/]{stats['frequent_commands']} (freq >= {min_freq})",
+                title="📊 历史扫描预览",
+                border_style="cyan"
+            )
+        )
+
+        if stats["top_10"]:
+            table = Table(title="Top 10 高频命令", show_header=True, header_style="bold magenta")
+            table.add_column("命令", style="green")
+            table.add_column("频率", style="yellow", justify="right")
+            for cmd, freq in stats["top_10"]:
+                table.add_row(cmd, str(freq))
+            console.print(table)
+        return
+
+    result = engine.sync_to_memory(
+        min_freq=min_freq,
+        max_memories=max_memories,
+        project=project,
+    )
+
+    console.print(
+        Panel(
+            f"[success]隐式记忆同步完成[/]\n\n"
+            f"  ✅ 新增：{result['created']} 条\n\n"
+            f"  🔄 更新：{result['updated']} 条\n\n"
+            f"  ⏭️ 跳过：{result['skipped']} 条",
+            title="🧠 隐式记忆",
+            border_style="green"
+        )
+    )
+
+
+# ==================== OpenClaw 集成命令 ====================
+
+@app.command("openclaw-install")
+def openclaw_install_cmd():
+    """
+    安装插件到 OpenClaw
+
+    将记忆引擎注册为 OpenClaw 插件，包括 Skills 和配置
+    """
+    bridge = get_openclaw_bridge()
+
+    try:
+        bridge.install_to_openclaw()
+        console.print(
+            Panel(
+                "[success]插件安装成功[/]\n\n"
+                "[info]已安装以下组件：[/]\n"
+                "  • openclaw.plugin.json（插件清单）\n"
+                "  • openclaw-plugin/（插件代码）\n"
+                "  • openclaw-skills/（5 个 Skills）\n\n"
+                "[info]下一步：[/]\n"
+                "  1. 运行 [alias]claw openclaw-config[/] 配置飞书渠道\n"
+                "  2. 运行 [alias]openclaw gateway[/] 启动网关",
+                title="🔌 OpenClaw 集成",
+                border_style="green"
+            )
+        )
+    except Exception as e:
+        console.print(f"[error]安装失败：{e}[/]")
+        raise typer.Exit(1)
+
+
+@app.command("openclaw-config")
+def openclaw_config_cmd(
+    app_id: str = typer.Option(..., "--app-id", help="飞书 App ID"),
+    app_secret: str = typer.Option(..., "--app-secret", help="飞书 App Secret"),
+):
+    """
+    配置 OpenClaw 飞书渠道
+
+    示例:
+
+        claw openclaw-config --app-id cli_xxx --app-secret xxx
+    """
+    bridge = get_openclaw_bridge()
+
+    if bridge.configure_openclaw_channel(app_id, app_secret):
+        console.print("[success]OpenClaw 飞书渠道配置成功[/]")
+        console.print("[info]请运行 openclaw gateway 启动网关[/]")
+    else:
+        console.print("[error]配置失败，请确认 OpenClaw 已安装[/]")
+        console.print("[info]安装 OpenClaw: npm i -g openclaw[/]")
+        raise typer.Exit(1)
+
+
+@app.command("openclaw-skills")
+def openclaw_skills_cmd():
+    """
+    列出所有 OpenClaw Skills
+    """
+    bridge = get_openclaw_bridge()
+    skills = bridge.get_skills_list()
+
+    if not skills:
+        console.print("[info]暂无可用 Skills[/]")
+        return
+
+    table = Table(
+        title="🧩 OpenClaw Skills",
+        show_header=True,
+        header_style="bold magenta",
+    )
+
+    table.add_column("名称", style="cyan")
+    table.add_column("描述", style="green")
+    table.add_column("版本", style="yellow")
+
+    for skill in skills:
+        table.add_row(
+            skill.get("name", "unknown"),
+            skill.get("description", ""),
+            skill.get("version", ""),
+        )
+
+    console.print(table)
+
+
+@app.command("openclaw-status")
+def openclaw_status_cmd():
+    """
+    查看 OpenClaw 集成状态
+    """
+    bridge = get_openclaw_bridge()
+    manifest = bridge.get_plugin_manifest()
+    skills = bridge.get_skills_list()
+
+    openclaw_installed = False
+    openclaw_version = "未安装"
+    try:
+        import subprocess
+        import shutil
+        openclaw_path = shutil.which("openclaw")
+        if not openclaw_path:
+            for candidate in [
+                os.path.join(os.environ.get("APPDATA", ""), "npm", "openclaw.cmd"),
+                os.path.join(os.environ.get("APPDATA", ""), "npm", "openclaw"),
+                "/usr/local/bin/openclaw",
+            ]:
+                if os.path.exists(candidate):
+                    openclaw_path = candidate
+                    break
+
+        if openclaw_path:
+            result = subprocess.run(
+                [openclaw_path, "--version"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                openclaw_installed = True
+                openclaw_version = result.stdout.strip()
+    except Exception:
+        pass
+
+    console.print(
+        Panel(
+            f"[info]OpenClaw CLI：[/] {'✅ ' + openclaw_version if openclaw_installed else '❌ 未安装'}\n\n"
+            f"[info]插件 ID：[/] {manifest.get('id', 'unknown')}\n\n"
+            f"[info]插件版本：[/] {manifest.get('version', 'unknown')}\n\n"
+            f"[info]插件类型：[/] {manifest.get('kind', 'unknown')}\n\n"
+            f"[info]Skills 数量：[/] {len(skills)}\n\n"
+            f"[info]数据目录：[/] {Path.home() / '.claw'}",
+            title="🔌 OpenClaw 集成状态",
+            border_style="cyan"
+        )
+    )
+
+    if not openclaw_installed:
+        console.print("\n[warning]OpenClaw 未安装，请运行：npm i -g openclaw[/]")
+
+
+# ==================== Shell 级别补全命令 ====================
+
+@app.command("install-shell-completion")
+def install_shell_completion_cmd(
+    shell: Optional[str] = typer.Option(
+        None, "--shell", "-s", help="Shell type (bash/zsh/powershell)"
+    ),
+):
+    """
+    安装 Shell 级别 TAB 补全
+
+    安装后，在终端输入 deploy-<TAB> 即可自动补全为完整命令
+
+    示例:
+
+        claw install-shell-completion
+
+        claw install-shell-completion --shell bash
+    """
+    if install_shell_completion(shell):
+        console.print("[success]Shell 补全安装成功[/]")
+        console.print("[info]请按照提示将 source 命令添加到 shell 配置文件中[/]")
+    else:
+        console.print("[error]安装失败[/]")
+        raise typer.Exit(1)
+
+
+@app.command("_shell-complete", hidden=True)
+def shell_complete_cmd(
+    prefix: str = typer.Argument(..., help="输入前缀"),
+):
+    """
+    Shell 补全后端（内部命令）
+
+    当用户在终端按 TAB 时，shell 脚本会调用此命令获取补全建议
+    """
+    import os
+    import logging
+
+    logging.disable(logging.CRITICAL)
+
+    matches = get_matching_memories(prefix, project=None)
+
+    if not matches:
+        try:
+            ctx_manager = get_context_manager()
+            context = ctx_manager.detect_context(os.getcwd())
+            if context.git_root:
+                matches = get_matching_memories(prefix, project=context.git_root)
+        except Exception:
+            pass
+
+    for m in matches:
+        print(m["command"])
+
 
 if __name__ == "__main__":
     app()

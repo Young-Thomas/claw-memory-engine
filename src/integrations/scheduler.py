@@ -68,7 +68,6 @@ class ForgettingScheduler:
             logger.warning("调度器已启动")
             return
 
-        # 添加定期检查任务（每天上午 9 点）
         self.scheduler.add_job(
             self.check_expiring_memories,
             CronTrigger(hour=9, minute=0),
@@ -76,7 +75,6 @@ class ForgettingScheduler:
             name="检查即将过期的记忆"
         )
 
-        # 添加清理任务（每周日凌晨 2 点）
         self.scheduler.add_job(
             self.cleanup_expired,
             CronTrigger(day_of_week="sun", hour=2, minute=0),
@@ -87,6 +85,12 @@ class ForgettingScheduler:
         self.scheduler.start()
         self._initialized = True
         logger.info("遗忘调度器已启动")
+
+        try:
+            self.check_expiring_memories()
+            logger.info("启动时立即执行了一次记忆检查")
+        except Exception as e:
+            logger.error(f"启动时记忆检查失败：{e}")
 
     def stop(self) -> None:
         """停止调度器"""

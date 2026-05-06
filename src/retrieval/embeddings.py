@@ -77,6 +77,9 @@ class EmbeddingModel:
     def _load_model(self):
         """加载嵌入模型"""
         try:
+            import os
+            os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
             from sentence_transformers import SentenceTransformer
 
             logger.info(f"Loading embedding model: {self.model_name}")

@@ -55,14 +55,19 @@ class SQLiteStore:
         self._initialized = True
 
     def _get_connection(self) -> sqlite3.Connection:
-        """获取数据库连接（带缓存）"""
-        if self.db_path in self._connection_cache:
-            return self._connection_cache[self.db_path]
+        """获取数据库连接（支持多线程）"""
+        # 检查当前线程ID，如果和缓存连接创建时不同则新建连接
+        import threading
+        current_thread = threading.current_thread().ident
+        cache_key = f"{self.db_path}_{current_thread}"
 
-        conn = sqlite3.connect(self.db_path)
+        if cache_key in self._connection_cache:
+            return self._connection_cache[cache_key]
+
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        self._connection_cache[self.db_path] = conn
-        logger.debug(f"New SQLite connection: {self.db_path}")
+        self._connection_cache[cache_key] = conn
+        logger.debug(f"New SQLite connection for thread {current_thread}: {self.db_path}")
         return conn
 
     def _init_tables(self):

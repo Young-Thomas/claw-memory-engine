@@ -1,0 +1,8 @@
+{
+  "name": "claw-memory-engine-openclaw-plugin",
+  "version": "0.1.0",
+  "description": "OpenClaw plugin for Claw Memory Engine - CLI intelligent memory assistant",
+  "main": "index.js",
+  "keywords": ["openclaw", "plugin", "memory", "cli", "feishu"],
+  "license": "MIT"
+}
